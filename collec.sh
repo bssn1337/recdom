@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
+set -u  # jangan pakai -e dulu biar gak mati di tengah
 
 # warna
 RED="\033[31m"
@@ -37,8 +37,10 @@ echo -e "${CYAN}[+] Scanning...${RESET}"
 
 count=0
 
-check_url() {
-    local url=$1
+for domain in $DOMAINS; do
+    count=$((count+1))
+
+    url="https://$domain"
 
     RESPONSE=$(curl -skL --max-time 3 -D - "$url" -o /dev/null 2>/dev/null || true)
 
@@ -51,7 +53,7 @@ check_url() {
     echo "$SERVER" | grep -qi apache && TECH="apache"
     echo "$SERVER" | grep -qi openresty && TECH="openresty"
 
-    # detect framework (basic dari header)
+    # detect framework
     FRAME="unknown"
     echo "$RESPONSE" | grep -qi laravel && FRAME="laravel"
     echo "$RESPONSE" | grep -qi next && FRAME="nextjs"
@@ -67,17 +69,7 @@ check_url() {
     elif [[ "$STATUS" =~ ^4|^5 ]]; then COLOR=$RED
     fi
 
-    echo -e "${COLOR}$url | ${STATUS:-dead} | $TECH | $FRAME | $WAF | ${SERVER:-unknown}${RESET}"
-}
-
-export -f check_url
-export RED GREEN YELLOW CYAN RESET
-
-# progress loop
-echo "$DOMAINS" | while read domain; do
-    count=$((count+1))
-    echo -ne "${CYAN}[$count/$TOTAL]${RESET} "
-    check_url "https://$domain"
+    echo -e "${CYAN}[$count/$TOTAL]${RESET} ${COLOR}$url | ${STATUS:-dead} | $TECH | $FRAME | $WAF | ${SERVER:-unknown}${RESET}"
 done
 
 echo -e "${GREEN}[+] DONE${RESET}"
