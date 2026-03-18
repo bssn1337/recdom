@@ -2,9 +2,7 @@
 
 set -u
 
-RED="\033[31m"
 GREEN="\033[32m"
-YELLOW="\033[33m"
 CYAN="\033[36m"
 RESET="\033[0m"
 
@@ -28,48 +26,38 @@ readarray -t DOMAINS < <(
     (collect_apache; collect_nginx; collect_caddy) \
     | sed 's/;//g' \
     | grep -Eo '([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}' \
+    | grep -v '^www\.' \
     | sort -u
 )
 
 TOTAL=${#DOMAINS[@]}
 
 echo -e "${CYAN}[+] Total domain: $TOTAL${RESET}"
-echo -e "${CYAN}[+] Scanning...${RESET}"
+echo -e "${CYAN}[+] Scanning (200 only)...${RESET}"
 
 count=0
 
 for domain in "${DOMAINS[@]}"; do
     ((count++))
-
     url="https://$domain"
-
-    # tampilkan dulu biar gak kosong
-    echo -ne "${CYAN}[$count/$TOTAL] Checking $url ... ${RESET}"
 
     RESPONSE=$(curl -skL --connect-timeout 2 --max-time 3 -D - "$url" -o /dev/null 2>/dev/null || true)
 
     STATUS=$(echo "$RESPONSE" | head -n 1 | awk '{print $2}')
-    SERVER=$(echo "$RESPONSE" | grep -i "^Server:" | awk '{print $2}' | tr -d '\r')
+    SERVER=$(echo "$RESPONSE" | grep -i "^Server:" | head -n1 | awk '{print $2}' | tr -d '\r')
 
-    TECH="unknown"
+    # hanya ambil 200
+    [[ "$STATUS" != "200" ]] && continue
+
+    # detect tech (skip apache)
+    TECH=""
     [[ "$SERVER" =~ [Nn]ginx ]] && TECH="nginx"
-    [[ "$SERVER" =~ [Aa]pache ]] && TECH="apache"
     [[ "$SERVER" =~ [Oo]penresty ]] && TECH="openresty"
 
-    FRAME="unknown"
-    echo "$RESPONSE" | grep -qi laravel && FRAME="laravel"
-    echo "$RESPONSE" | grep -qi next && FRAME="nextjs"
+    # skip kalau gak ada tech
+    [[ -z "$TECH" ]] && continue
 
-    WAF="none"
-    echo "$RESPONSE" | grep -qi cloudflare && WAF="cloudflare"
-
-    COLOR=$RESET
-    [[ "$STATUS" =~ ^2 ]] && COLOR=$GREEN
-    [[ "$STATUS" =~ ^3 ]] && COLOR=$YELLOW
-    [[ "$STATUS" =~ ^4|^5 ]] && COLOR=$RED
-
-    # overwrite line biar clean
-    echo -e "\r${CYAN}[$count/$TOTAL]${RESET} ${COLOR}$url | ${STATUS:-dead} | $TECH | $FRAME | $WAF | ${SERVER:-unknown}${RESET}"
+    echo -e "${GREEN}$url | $TECH${RESET}"
 done
 
 echo -e "${GREEN}[+] DONE${RESET}"
