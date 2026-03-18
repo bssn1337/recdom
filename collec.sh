@@ -1,108 +1,83 @@
 #!/bin/bash
 
-echo "[+] Collecting domains..."
+set -euo pipefail
 
-DOMAINS=""
+# warna
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+CYAN="\033[36m"
+RESET="\033[0m"
 
-# APACHE
-[ -d "/etc/apache2/sites-available" ] && \
-DOMAINS+=" $(grep -h -E "ServerName|ServerAlias" /etc/apache2/sites-available/* 2>/dev/null \
-| awk '{for(i=2;i<=NF;i++) print $i}')"
+echo -e "${CYAN}[+] Collecting domains...${RESET}"
 
-[ -d "/etc/httpd/conf.d" ] && \
-DOMAINS+=" $(grep -h -E "ServerName|ServerAlias" /etc/httpd/conf.d/* 2>/dev/null \
-| awk '{for(i=2;i<=NF;i++) print $i}')"
+collect_apache() {
+    grep -hE "ServerName|ServerAlias" /etc/apache2/sites-available/* 2>/dev/null \
+    | awk '{for(i=2;i<=NF;i++) print $i}'
+}
 
-# NGINX
-[ -d "/etc/nginx/sites-available" ] && \
-DOMAINS+=" $(grep -h "server_name" /etc/nginx/sites-available/* 2>/dev/null \
-| sed 's/server_name//g; s/;//g' \
-| awk '{for(i=1;i<=NF;i++) print $i}')"
+collect_nginx() {
+    grep -hE "server_name" /etc/nginx/sites-enabled/* 2>/dev/null \
+    | sed 's/server_name//g' | tr ' ' '\n'
+}
 
-[ -d "/etc/nginx/conf.d" ] && \
-DOMAINS+=" $(grep -h "server_name" /etc/nginx/conf.d/* 2>/dev/null \
-| sed 's/server_name//g; s/;//g' \
-| awk '{for(i=1;i<=NF;i++) print $i}')"
+collect_caddy() {
+    grep -hE "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}" /etc/caddy/Caddyfile 2>/dev/null || true
+}
 
-# CADDY
-[ -f "/etc/caddy/Caddyfile" ] && \
-DOMAINS+=" $(grep -v "#" /etc/caddy/Caddyfile \
-| grep -E "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}" \
-| awk '{print $1}')"
+DOMAINS=$( (collect_apache; collect_nginx; collect_caddy) \
+| sed 's/;//g' \
+| grep -Eo '([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}' \
+| sort -u )
 
-# CLEAN
-DOMAINS=$(echo $DOMAINS | tr ' ' '\n' | sed 's/\*\.//g' | grep -v localhost | grep -v "_" | sort -u)
+TOTAL=$(echo "$DOMAINS" | wc -l)
 
-echo "[+] Fingerprinting..."
-echo ""
+echo -e "${CYAN}[+] Total domain: $TOTAL${RESET}"
+echo -e "${CYAN}[+] Scanning...${RESET}"
 
-for d in $DOMAINS; do
-    for proto in https http; do
-        URL="$proto://$d"
+count=0
 
-        HEADER=$(curl -k -m 5 -s -I $URL)
-        BODY=$(curl -k -m 5 -s $URL | head -n 80)
+check_url() {
+    local url=$1
 
-        CODE=$(echo "$HEADER" | head -n 1 | awk '{print $2}')
-        SERVER=$(echo "$HEADER" | grep -i server | cut -d' ' -f2-)
+    RESPONSE=$(curl -skL --max-time 3 -D - "$url" -o /dev/null 2>/dev/null || true)
 
-        if [ ! -z "$CODE" ]; then
+    STATUS=$(echo "$RESPONSE" | head -n 1 | awk '{print $2}')
+    SERVER=$(echo "$RESPONSE" | grep -i "^Server:" | awk '{print $2}' | tr -d '\r')
 
-            TECH="unknown"
-            FRAMEWORK="unknown"
-            WAF="none"
+    # detect server
+    TECH="unknown"
+    echo "$SERVER" | grep -qi nginx && TECH="nginx"
+    echo "$SERVER" | grep -qi apache && TECH="apache"
+    echo "$SERVER" | grep -qi openresty && TECH="openresty"
 
-            # ======================
-            # WEB SERVER
-            # ======================
-            echo "$HEADER" | grep -qi "nginx" && TECH="nginx"
-            echo "$HEADER" | grep -qi "apache" && TECH="apache"
-            echo "$HEADER" | grep -qi "caddy" && TECH="caddy"
+    # detect framework (basic dari header)
+    FRAME="unknown"
+    echo "$RESPONSE" | grep -qi laravel && FRAME="laravel"
+    echo "$RESPONSE" | grep -qi next && FRAME="nextjs"
 
-            # ======================
-            # WAF / CDN DETECT
-            # ======================
-            echo "$HEADER" | grep -qi "cloudflare" && WAF="cloudflare"
-            echo "$HEADER" | grep -qi "cf-ray" && WAF="cloudflare"
-            echo "$HEADER" | grep -qi "akamai" && WAF="akamai"
-            echo "$HEADER" | grep -qi "sucuri" && WAF="sucuri"
+    # detect WAF
+    WAF="none"
+    echo "$RESPONSE" | grep -qi cloudflare && WAF="cloudflare"
 
-            # ======================
-            # FRAMEWORK DETECT
-            # ======================
+    # warna status
+    COLOR=$RESET
+    if [[ "$STATUS" =~ ^2 ]]; then COLOR=$GREEN
+    elif [[ "$STATUS" =~ ^3 ]]; then COLOR=$YELLOW
+    elif [[ "$STATUS" =~ ^4|^5 ]]; then COLOR=$RED
+    fi
 
-            # Laravel
-            echo "$HEADER $BODY" | grep -qi "laravel" && FRAMEWORK="laravel"
+    echo -e "${COLOR}$url | ${STATUS:-dead} | $TECH | $FRAME | $WAF | ${SERVER:-unknown}${RESET}"
+}
 
-            # Next.js
-            echo "$BODY" | grep -qi "_next" && FRAMEWORK="nextjs"
+export -f check_url
+export RED GREEN YELLOW CYAN RESET
 
-            # React
-            echo "$BODY" | grep -qi "react" && FRAMEWORK="react"
-
-            # Vue
-            echo "$BODY" | grep -qi "vue" && FRAMEWORK="vue"
-
-            # WordPress
-            echo "$BODY" | grep -qi "wp-content" && FRAMEWORK="wordpress"
-
-            # CodeIgniter
-            echo "$BODY" | grep -qi "ci_session" && FRAMEWORK="codeigniter"
-
-            # Node.js / Express
-            echo "$HEADER" | grep -qi "express" && FRAMEWORK="nodejs"
-
-            # ======================
-            # EXTRA DETECT (panel/api)
-            # ======================
-            curl -k -m 3 -s "$URL/admin" | grep -qi "login" && FRAMEWORK="$FRAMEWORK+admin"
-            curl -k -m 3 -s "$URL/api" | grep -qi "json" && FRAMEWORK="$FRAMEWORK+api"
-
-            echo "$URL | $CODE | $TECH | $FRAMEWORK | $WAF | $SERVER"
-            break
-        fi
-    done
+# progress loop
+echo "$DOMAINS" | while read domain; do
+    count=$((count+1))
+    echo -ne "${CYAN}[$count/$TOTAL]${RESET} "
+    check_url "https://$domain"
 done
 
-echo ""
-echo "[+] DONE"
+echo -e "${GREEN}[+] DONE${RESET}"
