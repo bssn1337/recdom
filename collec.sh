@@ -33,12 +33,9 @@ readarray -t DOMAINS < <(
 TOTAL=${#DOMAINS[@]}
 
 echo -e "${CYAN}[+] Total domain: $TOTAL${RESET}"
-echo -e "${CYAN}[+] Scanning (200 only)...${RESET}"
-
-count=0
+echo -e "${CYAN}[+] Scanning (200 + tech only)...${RESET}"
 
 for domain in "${DOMAINS[@]}"; do
-    ((count++))
     url="https://$domain"
 
     RESPONSE=$(curl -skL --connect-timeout 2 --max-time 3 -D - "$url" -o /dev/null 2>/dev/null || true)
@@ -46,16 +43,17 @@ for domain in "${DOMAINS[@]}"; do
     STATUS=$(echo "$RESPONSE" | head -n 1 | awk '{print $2}')
     SERVER=$(echo "$RESPONSE" | grep -i "^Server:" | head -n1 | awk '{print $2}' | tr -d '\r')
 
-    # hanya ambil 200
+    # hanya 200
     [[ "$STATUS" != "200" ]] && continue
 
-    # detect tech (skip apache)
-    TECH=""
-    [[ "$SERVER" =~ [Nn]ginx ]] && TECH="nginx"
-    [[ "$SERVER" =~ [Oo]penresty ]] && TECH="openresty"
-
-    # skip kalau gak ada tech
-    [[ -z "$TECH" ]] && continue
+    # detect tech (exclude apache)
+    if [[ "$SERVER" =~ [Nn]ginx ]]; then
+        TECH="nginx"
+    elif [[ "$SERVER" =~ [Oo]penresty ]]; then
+        TECH="openresty"
+    else
+        continue
+    fi
 
     echo -e "${GREEN}$url | $TECH${RESET}"
 done
