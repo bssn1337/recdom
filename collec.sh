@@ -33,7 +33,7 @@ readarray -t DOMAINS < <(
 TOTAL=${#DOMAINS[@]}
 
 echo -e "${CYAN}[+] Total domain: $TOTAL${RESET}"
-echo -e "${CYAN}[+] Scanning (200 + tech only)...${RESET}"
+echo -e "${CYAN}[+] Scanning (200 only)...${RESET}"
 
 for domain in "${DOMAINS[@]}"; do
     url="https://$domain"
@@ -46,16 +46,10 @@ for domain in "${DOMAINS[@]}"; do
     # hanya 200
     [[ "$STATUS" != "200" ]] && continue
 
-    # detect tech (exclude apache)
-    if [[ "$SERVER" =~ [Nn]ginx ]]; then
-        TECH="nginx"
-    elif [[ "$SERVER" =~ [Oo]penresty ]]; then
-        TECH="openresty"
-    else
-        continue
-    fi
+    # kalau kosong skip
+    [[ -z "$SERVER" ]] && continue
 
-    echo -e "${GREEN}$url | $TECH${RESET}"
+    echo -e "${GREEN}$url | $SERVER${RESET}"
 done
 
 echo -e "${GREEN}[+] DONE${RESET}"
