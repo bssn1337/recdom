@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -u  # jangan pakai -e dulu biar gak mati di tengah
+set -u
 
 # warna
 RED="\033[31m"
@@ -25,20 +25,23 @@ collect_caddy() {
     grep -hE "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}" /etc/caddy/Caddyfile 2>/dev/null || true
 }
 
-DOMAINS=$( (collect_apache; collect_nginx; collect_caddy) \
-| sed 's/;//g' \
-| grep -Eo '([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}' \
-| sort -u )
+# ambil & clean domain
+readarray -t DOMAINS < <(
+    (collect_apache; collect_nginx; collect_caddy) \
+    | sed 's/;//g' \
+    | grep -Eo '([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}' \
+    | sort -u
+)
 
-TOTAL=$(echo "$DOMAINS" | wc -l)
+TOTAL=${#DOMAINS[@]}
 
 echo -e "${CYAN}[+] Total domain: $TOTAL${RESET}"
 echo -e "${CYAN}[+] Scanning...${RESET}"
 
 count=0
 
-for domain in $DOMAINS; do
-    count=$((count+1))
+for domain in "${DOMAINS[@]}"; do
+    ((count++))
 
     url="https://$domain"
 
@@ -47,27 +50,22 @@ for domain in $DOMAINS; do
     STATUS=$(echo "$RESPONSE" | head -n 1 | awk '{print $2}')
     SERVER=$(echo "$RESPONSE" | grep -i "^Server:" | awk '{print $2}' | tr -d '\r')
 
-    # detect server
     TECH="unknown"
-    echo "$SERVER" | grep -qi nginx && TECH="nginx"
-    echo "$SERVER" | grep -qi apache && TECH="apache"
-    echo "$SERVER" | grep -qi openresty && TECH="openresty"
+    [[ "$SERVER" =~ [Nn]ginx ]] && TECH="nginx"
+    [[ "$SERVER" =~ [Aa]pache ]] && TECH="apache"
+    [[ "$SERVER" =~ [Oo]penresty ]] && TECH="openresty"
 
-    # detect framework
     FRAME="unknown"
     echo "$RESPONSE" | grep -qi laravel && FRAME="laravel"
     echo "$RESPONSE" | grep -qi next && FRAME="nextjs"
 
-    # detect WAF
     WAF="none"
     echo "$RESPONSE" | grep -qi cloudflare && WAF="cloudflare"
 
-    # warna status
     COLOR=$RESET
-    if [[ "$STATUS" =~ ^2 ]]; then COLOR=$GREEN
-    elif [[ "$STATUS" =~ ^3 ]]; then COLOR=$YELLOW
-    elif [[ "$STATUS" =~ ^4|^5 ]]; then COLOR=$RED
-    fi
+    [[ "$STATUS" =~ ^2 ]] && COLOR=$GREEN
+    [[ "$STATUS" =~ ^3 ]] && COLOR=$YELLOW
+    [[ "$STATUS" =~ ^4|^5 ]] && COLOR=$RED
 
     echo -e "${CYAN}[$count/$TOTAL]${RESET} ${COLOR}$url | ${STATUS:-dead} | $TECH | $FRAME | $WAF | ${SERVER:-unknown}${RESET}"
 done
