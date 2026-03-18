@@ -2,7 +2,6 @@
 
 set -u
 
-# warna
 RED="\033[31m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
@@ -25,7 +24,6 @@ collect_caddy() {
     grep -hE "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}" /etc/caddy/Caddyfile 2>/dev/null || true
 }
 
-# ambil & clean domain
 readarray -t DOMAINS < <(
     (collect_apache; collect_nginx; collect_caddy) \
     | sed 's/;//g' \
@@ -45,7 +43,10 @@ for domain in "${DOMAINS[@]}"; do
 
     url="https://$domain"
 
-    RESPONSE=$(curl -skL --max-time 3 -D - "$url" -o /dev/null 2>/dev/null || true)
+    # tampilkan dulu biar gak kosong
+    echo -ne "${CYAN}[$count/$TOTAL] Checking $url ... ${RESET}"
+
+    RESPONSE=$(curl -skL --connect-timeout 2 --max-time 3 -D - "$url" -o /dev/null 2>/dev/null || true)
 
     STATUS=$(echo "$RESPONSE" | head -n 1 | awk '{print $2}')
     SERVER=$(echo "$RESPONSE" | grep -i "^Server:" | awk '{print $2}' | tr -d '\r')
@@ -67,7 +68,8 @@ for domain in "${DOMAINS[@]}"; do
     [[ "$STATUS" =~ ^3 ]] && COLOR=$YELLOW
     [[ "$STATUS" =~ ^4|^5 ]] && COLOR=$RED
 
-    echo -e "${CYAN}[$count/$TOTAL]${RESET} ${COLOR}$url | ${STATUS:-dead} | $TECH | $FRAME | $WAF | ${SERVER:-unknown}${RESET}"
+    # overwrite line biar clean
+    echo -e "\r${CYAN}[$count/$TOTAL]${RESET} ${COLOR}$url | ${STATUS:-dead} | $TECH | $FRAME | $WAF | ${SERVER:-unknown}${RESET}"
 done
 
 echo -e "${GREEN}[+] DONE${RESET}"
